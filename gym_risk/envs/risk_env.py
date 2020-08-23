@@ -1,12 +1,25 @@
+from enum import Enum
+from typing import Optional, List
 import gym
+
+from gym_risk.agents.base_agent import BaseAgent
+from gym_risk.board import Board
+
 
 class RiskEnv(gym.Env):
     metadata = {'render.modes': ['human']}
 
-    def __init__(self):
+    def __init__(self, 
+                num_players: int=2,
+                agents: Optional[List[BaseAgent]]=None):
+
+        self.num_players = num_players
+        self.board = Board(agents=agents, num_players=self.num_players)
+        self.phase = Phase.TURN_IN_CARDS
+        self.current_player_id = 0
         pass
 
-    def _step(self, action):
+    def take_turn(self):
         """
         Parameters
         ----------
@@ -34,27 +47,59 @@ class RiskEnv(gym.Env):
                  However, official evaluations of your agent are not allowed to
                  use this for learning.
         """
-        self._take_action(action)
-        self.status = self.env.step()
-        reward = self._get_reward()
-        ob = self.env.getState()
-        episode_over = self.status != hfo_py.IN_GAME
-        return ob, reward, episode_over, {}
+        current_agent = self.board.agents[self.current_player_id]
 
-    def _reset(self):
+        self.turn_in_cards_phase(current_agent)
+        self.reinforce_phase(current_agent)
+        self.attack_phase(current_agent)
+        self.tactical_move_phase(current_agent)
+        self.draw_card_phase(current_agent)
+
+    def attack_phase(self,agent):
+        while self.phase == Phase.ATTACK:
+            attack = agent.make_attack_decision(self.board)
+            if attack is not None:
+                country_1 = self.board.graph.nodes[attack[0]]
+                country_2 = self.board.graph.nodes[attack[1]]
+                self.board.try_attack(country_1, country_2, agent.id)
+            else:
+                self.phase = Phase.TACTICAL_MOVE
         pass
 
-    def _render(self, mode='human', close=False):
+    def reinforce_phase(self, agent):
+        self.phase = Phase.ATTACK
         pass
 
-    def _take_action(self, action):
+    def turn_in_cards_phase(self, agent):
+        self.phase = Phase.REINFORCE
         pass
 
-    def _get_reward(self):
+    def tactical_move_phase(self, agent):
+        self.phase = Phase.DRAW_CARD
+        pass
+
+    def draw_card_phase(self, agent):
+        self.current_player_id = (self.current_player_id + 1 % self.num_players)
+        self.phase = Phase.TURN_IN_CARDS
+        pass
+
+    def reset(self):
+        pass
+
+    def render(self, mode='human', close=False):
+        pass
+
+    def take_action(self, action):
+        pass
+
+    def get_reward(self):
         """ Reward is given for XY. """
-        if self.status == FOOBAR:
-            return 1
-        elif self.status == ABC:
-            return self.somestate ** 2
-        else:
-            return 0
+        return 0
+
+# creating enumerations using class 
+class Phase(Enum): 
+    TURN_IN_CARDS = 1 
+    REINFORCE = 2
+    ATTACK = 3
+    TACTICAL_MOVE = 4
+    DRAW_CARD = 5

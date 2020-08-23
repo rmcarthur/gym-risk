@@ -1,3 +1,4 @@
 .DS_STORE
 *.ipynb*
 *__pycache__
+.vscode
