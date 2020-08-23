@@ -1,6 +1,8 @@
+import logging
 import random
 import json
 from pathlib import Path
+from collections import Counter
 import networkx as nx
 from typing import List,Optional
 from matplotlib import pyplot as plt
@@ -57,32 +59,78 @@ class Board():
         nx.set_node_attributes(self.graph, payload, "player")
         pass
 
+    def get_all_player_nodes(self, agent_id: int):
+        player_owned_nodes = [i[0] for i in self.graph.nodes(data='player_id') if i[1] == agent_id]
+        return player_owned_nodes
+
+    def get_all_bordering_nodes(self,agent_id: int):
+        player_owned_nodes = self.get_all_player_nodes(agent_id)
+        bordering_nodes = [i[0] for i in self.graph.edges(player_owned_nodes) if i[1] not in player_owned_nodes]
+        return bordering_nodes
+    
+    def get_territory_counts(self):
+        territory_counter = Counter()
+        for i in self.graph.nodes(data='player_id'):
+            territory_counter[i[1]] +=1
+        return territory_counter
+
+    def game_over(self):
+        territory_counter = self.get_territory_counts()
+        logging.info(f"Territory Counter: {territory_counter}")
+        if max(territory_counter.values()) == self.graph.number_of_nodes():
+            game_over = True
+            winner = list(territory_counter.keys())[0]
+        else: 
+            game_over = False
+            winner = None
+        return game_over, winner
+
+
     # Get all possible moves
-    def get_all_possible_attacks(self):
-        player_owned_nodes = [i[0] for i in self.graph.nodes(data='player') if i[1] == 'blue']
+    def get_all_player_attacks(self,agent_id: int):
+        player_owned_nodes = self.get_all_player_nodes(agent_id)
         units = [i[0] for i in self.graph.nodes(data='units') if i[1] > 1]
         player_possible_attack_nodes = [node for node in player_owned_nodes if node in units] 
         attack_edges = [i for i in self.graph.edges(player_possible_attack_nodes) if i[1] not in player_owned_nodes]
         return attack_edges
 
-    def try_attack(self, attack_id: str, defend_id: str, player_id: int):
+    def get_all_possible_attacks(self):
+        player_owned_nodes = self.graph.nodes(data='player_id')
+        units = [i[0] for i in self.graph.nodes(data='units') if i[1] > 1]
+        player_possible_attack_nodes = [node[0] for node in player_owned_nodes if node[0] in units] 
+        all_attacks = [i for i in self.graph.edges(player_possible_attack_nodes) if player_owned_nodes[i[0]] != player_owned_nodes[i[1]]]
+        return all_attacks
+
+    def try_attack(self, attack_id: str, defend_id: str, agent: BaseAgent):
         # Validate move is legal
+        player_id = agent.id
+        logging.info(f"Attack_id: {attack_id}")
+        logging.info(f"Defend_id: {defend_id}")
+        logging.info(f"Player_id: {player_id}")
         attack_units = self.graph.nodes[attack_id]['units']
         defend_units = self.graph.nodes[defend_id]['units']
+        defender_player_id = self.graph.nodes[defend_id]['player_id']
         try:
             assert self.graph.nodes[attack_id]['player_id'] == player_id
-            assert self.graph.nodes[defend_id]['player_id'] != player_id
+            assert defender_player_id != player_id
             assert attack_units > 1
             assert defend_units > 0
         except AssertionError:
             raise AssertionError(f"Not a valid move")
+        logging.info(f"{attack_id} is controlled by {player_id} and has {attack_units} Units")
+        logging.info(f"{defend_id} is controlled by {defender_player_id} and has {defend_units} Units")
         attack_loss, defend_loss = single_roll(attack_units-1 , defend_units)
         #TODO: Institute a logger here
-        print(f"Attacker loses {attack_loss} unit(s), Defender loses {defend_loss} unit(s)")
+        logging.info(f"Attacker loses {attack_loss} unit(s), Defender loses {defend_loss} unit(s)")
         self.graph.nodes[attack_id]['units'] -= attack_loss 
         self.graph.nodes[defend_id]['units'] -= defend_loss 
         if self.graph.nodes[defend_id]['units'] == 0:
-            print(f"Attacker takes {defend_id}")
+            logging.info(f"Attacker takes {defend_id}")
+            self.graph.nodes[defend_id]['player_id'] = agent.id
+            self.graph.nodes[defend_id]['player_color'] = agent.color
+            self.graph.nodes[defend_id]['units'] = self.graph.nodes[attack_id]['units']
+            self.graph.nodes[attack_id]['units'] = 1
+
 
     def show_board(self):
         graph_json = nx.node_link_data(self.graph)

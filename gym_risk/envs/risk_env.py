@@ -1,3 +1,4 @@
+import logging
 from enum import Enum
 from typing import Optional, List
 import gym
@@ -5,7 +6,10 @@ import gym
 from gym_risk.agents.base_agent import BaseAgent
 from gym_risk.board import Board
 
+logging.basicConfig(filename='riskLog.log', level=logging.INFO,filemode='w')
 
+global MAX_ROUNDS
+MAX_ROUNDS = 10000
 class RiskEnv(gym.Env):
     metadata = {'render.modes': ['human']}
 
@@ -14,17 +18,22 @@ class RiskEnv(gym.Env):
                 agents: Optional[List[BaseAgent]]=None):
 
         self.num_players = num_players
-        self.board = Board(agents=agents, num_players=self.num_players)
+        self.agents = agents
+        self.episode_over = False
+        self.board = Board(agents=self.agents, num_players=self.num_players)
         self.phase = Phase.TURN_IN_CARDS
         self.current_player_id = 0
+        self.current_round = 0
+        self.current_stage_count = 0
+        self.reinforce_min = 3
+        self.territory_counts = []
+        logging.info("Began Env")
         pass
 
-    def take_turn(self):
+    def step(self):
         """
         Parameters
         ----------
-        action :
-
         Returns
         -------
         ob, reward, episode_over, info : tuple
@@ -47,7 +56,34 @@ class RiskEnv(gym.Env):
                  However, official evaluations of your agent are not allowed to
                  use this for learning.
         """
-        current_agent = self.board.agents[self.current_player_id]
+        reward = 0
+        info = {}
+        while not self.episode_over:
+            self.current_round += 1
+            logging.info(f"Beginning round {self.current_round}")
+            self.debug = False 
+            if self.debug:
+                self.board.show_board()
+            for agent in self.agents:
+                ## Check if game is over
+                game_over, winner = self.board.game_over()
+                if game_over:
+                    self.episode_over = True
+                    continue
+                self.take_turn(agent)
+            
+            if self.current_round % 100 == 0:
+                logging.info(f"On round {self.current_round}")
+            # End after MAX_ROUNDS
+            if self.current_round >= MAX_ROUNDS:
+                self.episode_over = True
+
+        info['rounds_played'] = self.current_round
+        info['winner'] = winner
+        return self.board.graph, reward, self.episode_over, info
+
+    def take_turn(self, current_agent):
+        logging.info(f"Begining Turn {self.current_round} for Player {self.current_player_id}")
 
         self.turn_in_cards_phase(current_agent)
         self.reinforce_phase(current_agent)
@@ -56,25 +92,43 @@ class RiskEnv(gym.Env):
         self.draw_card_phase(current_agent)
 
     def attack_phase(self,agent):
+        logging.info("Beginning attack")
+        self.current_stage_count = 0
         while self.phase == Phase.ATTACK:
-            attack = agent.make_attack_decision(self.board)
+            attack = agent.make_attack_decision(self.board, self.current_stage_count)
+            logging.info(f"Attacking {attack}")
             if attack is not None:
-                country_1 = self.board.graph.nodes[attack[0]]
-                country_2 = self.board.graph.nodes[attack[1]]
-                self.board.try_attack(country_1, country_2, agent.id)
+                country_1 = self.board.graph.nodes[attack[0]]['id']
+                country_2 = self.board.graph.nodes[attack[1]]['id']
+                self.board.try_attack(country_1, country_2, agent)
+                self.current_stage_count += 1 
             else:
                 self.phase = Phase.TACTICAL_MOVE
         pass
 
     def reinforce_phase(self, agent):
+        logging.info("Reinforcing")
+        ## Get Total territories count
+        nodes_controlled = len([i for i in self.board.graph.nodes(data='player_id') if i[1] == agent.id])
+        bonus = max(3, nodes_controlled // 3)
+        logging.info(f"Player {agent.id} has {nodes_controlled} territories and will receive {bonus} reinforcements")
+        bonus_territories = agent.make_reinforce_decision(self.board, bonus)
+        for t in bonus_territories:
+            # Verify ownership
+            assert self.board.graph.nodes[t]['player_id'] == agent.id
+            logging.info(f"Adding 1 unit to {t} for player {agent.id}")
+            self.board.graph.nodes[t]['units'] += 1
+            logging.info(f"New total on {t} is {self.board.graph.nodes[t]['units']}")
         self.phase = Phase.ATTACK
         pass
 
     def turn_in_cards_phase(self, agent):
+        logging.info("Turning in Cards")
         self.phase = Phase.REINFORCE
         pass
 
     def tactical_move_phase(self, agent):
+        logging.info("Tactical Move")
         self.phase = Phase.DRAW_CARD
         pass
 

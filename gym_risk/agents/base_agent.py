@@ -9,7 +9,7 @@ class BaseAgent():
         self.color = color
         pass
 
-    def make_attack_decision(self,actions):
+    def make_attack_decision(self,actions, *args):
         '''
         actions: A list of available actions
 
@@ -17,7 +17,7 @@ class BaseAgent():
         '''
         raise NotImplementedError 
 
-    def make_reinforce_decisioin(self,actions):
+    def make_reinforce_decision(self,actions, *args):
         '''
         '''
         raise NotImplementedError
